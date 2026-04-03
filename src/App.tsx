@@ -22,17 +22,24 @@ const handleSupabaseError = (error: any, operation: string) => {
 
 // Fallback voter ID for when auth fails
 const getFallbackVoterId = () => {
-  let id = localStorage.getItem('oscar_voter_id');
-  if (!id) {
-    id = 'anon_' + Math.random().toString(36).substring(2, 15);
-    localStorage.setItem('oscar_voter_id', id);
+  try {
+    let id = localStorage.getItem('oscar_voter_id');
+    if (!id) {
+      id = 'anon_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('oscar_voter_id', id);
+    }
+    return id;
+  } catch (e) {
+    console.warn('LocalStorage non disponibile, uso ID temporaneo');
+    return 'temp_' + Math.random().toString(36).substring(2, 15);
   }
-  return id;
 };
 
 export default function App() {
   const [voterId] = useState(getFallbackVoterId());
   const [isReady, setIsReady] = useState(false);
+  const [isVoting, setIsVoting] = useState(false);
+  const [votingError, setVotingError] = useState<string | null>(null);
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0);
   const [selections, setSelections] = useState<Record<string, string>>({
     first: '',
@@ -99,6 +106,9 @@ export default function App() {
   const handleVote = async () => {
     if (!selections.first || !selections.second || !selections.third) return;
 
+    setIsVoting(true);
+    setVotingError(null);
+
     const voteData = {
       categoryId: currentCategory.id,
       firstPlace: selections.first,
@@ -122,8 +132,11 @@ export default function App() {
       } else {
         setView('finished');
       }
-    } catch (error) {
+    } catch (error: any) {
       handleSupabaseError(error, 'INSERT_VOTE');
+      setVotingError(error.message || 'Errore durante il salvataggio del voto.');
+    } finally {
+      setIsVoting(false);
     }
   };
 
@@ -184,8 +197,16 @@ export default function App() {
     );
   }
 
+  const isConfigured = !!import.meta.env.VITE_SUPABASE_URL && !!import.meta.env.VITE_SUPABASE_ANON_KEY;
+
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-sans selection:bg-amber-500/30">
+      {!isConfigured && (
+        <div className="bg-red-500/10 border-b border-red-500/20 p-4 text-center text-red-500 text-sm font-bold flex items-center justify-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          Configurazione Supabase mancante. Controlla le variabili d'ambiente su Vercel.
+        </div>
+      )}
       {/* Header */}
       <header className="p-6 flex justify-between items-center border-b border-white/10 bg-black/50 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-3">
@@ -269,13 +290,26 @@ export default function App() {
               </div>
 
               <div className="pt-8 flex flex-col sm:flex-row gap-4">
-                <button
-                  onClick={handleVote}
-                  disabled={!selections.first || !selections.second || !selections.third || votedCategories.has(currentCategory.id)}
-                  className="flex-1 bg-gradient-to-r from-amber-500 to-orange-600 text-black font-black py-4 rounded-xl shadow-[0_0_30px_rgba(245,158,11,0.3)] hover:shadow-[0_0_40px_rgba(245,158,11,0.5)] transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-tighter text-lg"
-                >
-                  {votedCategories.has(currentCategory.id) ? 'Voto Registrato' : 'Conferma Voto'}
-                </button>
+                <div className="flex-1 space-y-2">
+                  <button
+                    onClick={handleVote}
+                    disabled={!selections.first || !selections.second || !selections.third || votedCategories.has(currentCategory.id) || isVoting}
+                    className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-black font-black py-4 rounded-xl shadow-[0_0_30px_rgba(245,158,11,0.3)] hover:shadow-[0_0_40px_rgba(245,158,11,0.5)] transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-tighter text-lg flex items-center justify-center gap-2"
+                  >
+                    {isVoting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : votedCategories.has(currentCategory.id) ? (
+                      'Voto Registrato'
+                    ) : (
+                      'Conferma Voto'
+                    )}
+                  </button>
+                  {votingError && (
+                    <p className="text-red-500 text-sm font-bold flex items-center gap-1">
+                      <AlertCircle className="w-4 h-4" /> {votingError}
+                    </p>
+                  )}
+                </div>
                 
                 <div className="flex gap-2">
                   <button
