@@ -59,27 +59,44 @@ export default function App() {
   // Initial data fetch and realtime setup
   useEffect(() => {
     const fetchData = async () => {
-      // Fetch all votes
-      const { data: votes, error } = await supabase
-        .from('votes')
-        .select('*');
-      
-      if (error) {
-        handleSupabaseError(error, 'FETCH_VOTES');
-      } else if (votes) {
-        setAllVotes(votes as Vote[]);
+      try {
+        // Fetch all votes
+        const { data: votes, error } = await supabase
+          .from('votes')
+          .select('*');
         
-        // Update voted categories for current user
-        const userVoted = new Set<string>();
-        votes.forEach((v: any) => {
-          if (v.voterId === voterId) {
-            userVoted.add(v.categoryId);
-          }
-        });
-        setVotedCategories(userVoted);
+        if (error) {
+          handleSupabaseError(error, 'FETCH_VOTES');
+        } else if (votes) {
+          // Normalizziamo i dati per gestire sia camelCase che lowercase
+          const normalizedVotes = (votes as any[]).map(v => ({
+            categoryId: v.categoryId || v.categoryid,
+            firstPlace: v.firstPlace || v.firstplace,
+            secondPlace: v.secondPlace || v.secondplace,
+            thirdPlace: v.thirdPlace || v.thirdplace,
+            voterId: v.voterId || v.voterid,
+            timestamp: v.timestamp
+          })) as Vote[];
+
+          setAllVotes(normalizedVotes);
+          
+          // Update voted categories for current user
+          const userVoted = new Set<string>();
+          normalizedVotes.forEach((v) => {
+            if (v.voterId === voterId) {
+              userVoted.add(v.categoryId);
+            }
+          });
+          setVotedCategories(userVoted);
+        }
+      } catch (err: any) {
+        console.error('Errore di rete iniziale:', err);
+        if (err.message === 'Failed to fetch') {
+          setVotingError('Errore di connessione a Supabase. Controlla l\'URL o l\'ad-blocker.');
+        }
+      } finally {
+        setIsReady(true);
       }
-      
-      setIsReady(true);
     };
 
     fetchData();
@@ -88,7 +105,16 @@ export default function App() {
     const subscription = supabase
       .channel('public:votes')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'votes' }, (payload) => {
-        const newVote = payload.new as Vote;
+        const raw = payload.new as any;
+        const newVote: Vote = {
+          categoryId: raw.categoryId || raw.categoryid,
+          firstPlace: raw.firstPlace || raw.firstplace,
+          secondPlace: raw.secondPlace || raw.secondplace,
+          thirdPlace: raw.thirdPlace || raw.thirdplace,
+          voterId: raw.voterId || raw.voterid,
+          timestamp: raw.timestamp
+        };
+        
         setAllVotes(prev => [...prev, newVote]);
         if (newVote.voterId === voterId) {
           setVotedCategories(prev => new Set(prev).add(newVote.categoryId));
@@ -390,13 +416,14 @@ export default function App() {
                       const item = podium[posIdx];
                       if (!item) return <div key={i} className="flex-1" />;
 
-                      const heights = ['h-48', 'h-64', 'h-32'];
+                      // podium[0] is 1st, podium[1] is 2nd, podium[2] is 3rd
+                      const heights = ['h-64', 'h-48', 'h-32'];
                       const colors = [
-                        'bg-gradient-to-t from-slate-700 to-slate-400',
                         'bg-gradient-to-t from-amber-700 to-amber-400',
+                        'bg-gradient-to-t from-slate-700 to-slate-400',
                         'bg-gradient-to-t from-orange-800 to-orange-500'
                       ];
-                      const labels = ['2°', '1°', '3°'];
+                      const labels = ['1°', '2°', '3°'];
 
                       return (
                         <motion.div
